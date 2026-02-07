@@ -1,17 +1,10 @@
 package com.springdemo.main.cheong_be.service;
 
-import com.springdemo.main.cheong_be.dto.LearningCompleteRequest;
 import com.springdemo.main.cheong_be.dto.DailyWordResponse;
-import com.springdemo.main.cheong_be.dto.LearningHistoryPatchRequest;
-import com.springdemo.main.cheong_be.dto.StreakResponse;
-import com.springdemo.main.cheong_be.model.DailyLog;
-import com.springdemo.main.cheong_be.model.LearningHistory;
-import com.springdemo.main.cheong_be.model.UserProgress;
-import com.springdemo.main.cheong_be.model.Word;
-import com.springdemo.main.cheong_be.repository.DailyLogRepository;
-import com.springdemo.main.cheong_be.repository.LearningHistoryRepository;
-import com.springdemo.main.cheong_be.repository.UserProgressRepository;
-import com.springdemo.main.cheong_be.repository.WordRepository;
+import com.springdemo.main.cheong_be.dto.LearningCompleteRequest;
+import com.springdemo.main.cheong_be.dto.LearningCompleteResponse;
+import com.springdemo.main.cheong_be.model.*;
+import com.springdemo.main.cheong_be.repository.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -30,6 +23,9 @@ public class LearningService {
     private final DailyLogRepository dailyLogRepository;
     private final LearningHistoryRepository learningHistoryRepository;
     private final UserProgressRepository userProgressRepository;
+
+    // 팀원분이 만든 AiService (Gemini)
+    private final AiService aiService;
 
     /**
      * [1] 오늘의 단어 조회
@@ -67,43 +63,44 @@ public class LearningService {
                 .build();
     }
 
+    // 내부 메서드: 일일 할당량 생성 로직 (New 2 + Review 1)
     private DailyLog createNewDailyLog(String userId, LocalDate date) {
 
-        // [Step 1] 복습 단어 1개 뽑기 (기존 로직 유지)
+        // 1. 복습 단어 1개 뽑기 (과거 기록에서 중복 제거 후 추출)
         List<String> reviewedWordIds = learningHistoryRepository.findAllByUserIdOrderByCreatedAtDesc(userId)
-                .stream().map(LearningHistory::getWordId).distinct().collect(Collectors.toList());
+                .stream()
+                .map(LearningHistory::getWordId)
+                .distinct()
+                .collect(Collectors.toList());
 
         List<String> selectedIds = new ArrayList<>();
+
+        // 기록이 있다면 섞어서 1개 뽑기
         if (!reviewedWordIds.isEmpty()) {
-            Collections.shuffle(reviewedWordIds); // 리스트 섞기
-            selectedIds.add(reviewedWordIds.get(0)); // 첫 번째 거 뽑기
+            Collections.shuffle(reviewedWordIds);
+            selectedIds.add(reviewedWordIds.get(0));
         }
 
-        // [Step 2] 부족한 개수만큼 Gemini에게 "새 단어" 요청
-        int wordsNeeded = 3 - selectedIds.size();
-        if (wordsNeeded > 0) {
-            // 예: GeminiService를 통해 단어 리스트(DTO)를 받아옴
-            // List<WordDto> newWordsFromGemini = geminiService.getNewWords(wordsNeeded);
+        // 2. 부족한 개수만큼 채우기 (현재는 DB 전체 단어 중 랜덤)
+        // 추후 Gemini가 생성한 단어를 Word DB에 저장 후 가져오는 로직으로 변경 가능
+        List<Word> allWords = wordRepository.findAll();
 
-            // ★ 중요: Gemini가 준 단어를 DB(Word 컬렉션)에 저장해야 ID가 생김!
-        /* for (WordDto dto : newWordsFromGemini) {
-            // 이미 DB에 있는지 중복 체크 (선택사항)
-            // Word newWord = Word.builder().word(dto.getWord()).meaning(dto.getMeaning()).build();
-            // Word savedWord = wordRepository.save(newWord); // <--- 여기서 DB에 저장됨!
-            // selectedIds.add(savedWord.getId());
+        if (allWords.size() < 3) {
+            // 개발용 더미데이터가 부족할 때를 위한 로그
+            System.out.println("Warning: DB에 단어가 3개 미만입니다.");
         }
-        */
 
-            // (임시) 현재는 DB에 있는거 랜덤으로 뽑기 (Gemini 연동 전까지 유지)
-            List<Word> allWords = wordRepository.findAll();
-            Collections.shuffle(allWords);
-            for (Word w : allWords) {
-                if (selectedIds.size() >= 3) break;
-                if (!selectedIds.contains(w.getId())) selectedIds.add(w.getId());
+        Collections.shuffle(allWords);
+
+        for (Word w : allWords) {
+            if (selectedIds.size() >= 3) break;
+            // 중복 방지
+            if (!selectedIds.contains(w.getId())) {
+                selectedIds.add(w.getId());
             }
         }
 
-        // [Step 3] DailyLog 저장 (이건 잘 되어 있음)
+        // 3. DailyLog 저장
         DailyLog newLog = DailyLog.builder()
                 .userId(userId)
                 .date(date)
@@ -111,39 +108,42 @@ public class LearningService {
                 .completedWordIds(new ArrayList<>())
                 .build();
 
-        return dailyLogRepository.save(newLog); // 여기서 로그가 저장됨
+        return dailyLogRepository.save(newLog);
     }
 
     /**
-     * [2] 학습 완료 처리 (저장 & Streak 갱신)
-     * - 프론트가 보낸(또는 Gemini가 준) 평가 결과를 DB에 저장
-     * - 오늘 3개를 다 했으면 Streak +1
+     * [2] 통합된 학습 완료 처리 (Gemini 호출 + 저장 + 스트릭)
      */
     @Transactional
-    public StreakResponse completeLearning(LearningCompleteRequest request) {
+    public LearningCompleteResponse completeLearning(LearningCompleteRequest request) {
         String userId = request.getUserId();
         LocalDate today = LocalDate.now();
 
-        // 1. 학습 이력 저장 (History)
+        // [Step 1] 서버 내부에서 Gemini API 호출 (임시 데이터)
+        // AiResponse aiRes = aiService.eval(request.getUserSentence());
+        String aiEvaluation = "문법적으로 자연스럽습니다! (Gemini)";
+        String aiSentence = "Here is a better example... (Gemini)";
+
+        // [Step 2] 완성된 데이터를 한 번에 저장 (History)
         LearningHistory history = LearningHistory.builder()
                 .userId(userId)
                 .wordId(request.getWordId())
                 .userSentence(request.getUserSentence())
-                .aiEvaluation(request.getAiEvaluation()) // 이미 AI가 평가한 값
-                .aiSentence(request.getAiSentence())     // 이미 AI가 준 값
+                .aiEvaluation(aiEvaluation)
+                .aiSentence(aiSentence)
                 .build();
         learningHistoryRepository.save(history);
 
-        // 2. DailyLog 업데이트 (완료 도장 찍기)
+        // [Step 3] DailyLog 업데이트
         DailyLog dailyLog = dailyLogRepository.findByUserIdAndDate(userId, today)
-                .orElseThrow(() -> new RuntimeException("오늘의 학습 로그가 없습니다."));
+                .orElseThrow(() -> new RuntimeException("오늘의 학습 로그가 없습니다. (먼저 /words/daily를 호출하세요)"));
 
         if (!dailyLog.getCompletedWordIds().contains(request.getWordId())) {
             dailyLog.getCompletedWordIds().add(request.getWordId());
             dailyLogRepository.save(dailyLog);
         }
 
-        // 3. Streak 관리 (UserProgress)
+        // [Step 4] Streak 관리
         UserProgress progress = userProgressRepository.findById(userId)
                 .orElse(UserProgress.builder()
                         .userId(userId)
@@ -151,32 +151,31 @@ public class LearningService {
                         .todayCompleted(false)
                         .build());
 
-        // 오늘 목표 달성 여부 확인
         boolean isGoalCompleted = dailyLog.getCompletedWordIds().size() >= 3;
         String message = "학습이 저장되었습니다.";
 
-        // "오늘 처음으로" 목표를 달성한 경우에만 Streak 증가
         if (isGoalCompleted && !progress.isTodayCompleted()) {
-            // 어제 학습했는지 확인 (연속 학습 로직)
             LocalDate yesterday = today.minusDays(1);
+
+            // 어제 했으면 연속 스트릭, 아니면 1일차
             if (progress.getLastLearningDate() != null && progress.getLastLearningDate().equals(yesterday)) {
                 progress.setCurrentStreak(progress.getCurrentStreak() + 1);
             } else {
-                // 어제 안했으면 Streak 1부터 다시 시작 (또는 정책에 따라 유지)
                 progress.setCurrentStreak(1);
             }
-
             progress.setTodayCompleted(true);
             progress.setLastLearningDate(today);
-            message = "오늘의 목표 달성! Streak가 올라갑니다! 🔥";
+            message = "축하합니다! 오늘의 목표 달성! Streak +1 🔥";
         }
-
         userProgressRepository.save(progress);
 
-        return StreakResponse.builder()
+        // [Step 5] 결과 반환
+        return LearningCompleteResponse.builder()
                 .currentStreak(progress.getCurrentStreak())
                 .isDailyGoalCompleted(isGoalCompleted)
                 .message(message)
+                .aiEvaluation(aiEvaluation)
+                .aiSentence(aiSentence)
                 .build();
     }
 
@@ -186,17 +185,4 @@ public class LearningService {
     public List<LearningHistory> getHistory(String userId) {
         return learningHistoryRepository.findAllByUserIdOrderByCreatedAtDesc(userId);
     }
-
-    @Transactional
-    public void patchHistory(String historyId, LearningHistoryPatchRequest request) {
-        LearningHistory history = learningHistoryRepository.findById(historyId)
-                .orElseThrow(() -> new RuntimeException("해당 학습 이력이 없습니다."));
-
-        if (request.getUserSentence() != null) history.setUserSentence(request.getUserSentence());
-        if (request.getAiEvaluation() != null) history.setAiEvaluation(request.getAiEvaluation());
-        if (request.getAiSentence() != null) history.setAiSentence(request.getAiSentence());
-
-        learningHistoryRepository.save(history);
-    }
-
 }
