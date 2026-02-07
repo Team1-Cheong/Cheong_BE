@@ -7,7 +7,9 @@ import lombok.Getter;
 @AllArgsConstructor
 public enum AiPrompt {
   GET_THREE_WORDS("""
-      "어휘력 증가를 위한 단어 3가지 각각 뜻과 함께 뽑아줘."
+      "어휘력 증가를 위한 단어 3가지 각각 뜻과 함께 뽑아줘. 해당 기존 단어들을 제외한, 다른 단어들을 추천해줘."
+      [기존 단어]
+      %s
       
         "[출력 형식] 마크다운을 제외하고 json으로 보낼 것"
         [예시]

@@ -21,9 +21,19 @@ public class AiResDto {
     }
   }
 
+  @Data
   @Builder
-  public record Words(List<Word> words){
+  public static class Words {
+    private List<WordDto> words; // 여기가 핵심!
+  }
 
+  @Data
+  @Builder
+  public static class WordDto {
+    private String id;
+    private String word;
+    private String meaning;
+    private boolean isReview; // ★ Flag 추가! (true면 복습, false면 신규)
   }
 
   @Data
