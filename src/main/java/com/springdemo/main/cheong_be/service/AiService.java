@@ -1,7 +1,9 @@
 package com.springdemo.main.cheong_be.service;
 
 
+import com.springdemo.main.cheong_be.dto.AiReqDto.EvaluationReq;
 import com.springdemo.main.cheong_be.dto.AiReqDto.GeminiReq;
+import com.springdemo.main.cheong_be.dto.AiResDto.EvaluationRes;
 import com.springdemo.main.cheong_be.dto.AiResDto.GeminiRes;
 import com.springdemo.main.cheong_be.dto.AiResDto.Words;
 import com.springdemo.main.cheong_be.enums.AiPrompt;
@@ -40,8 +42,22 @@ public class AiService {
         .body(GeminiRes.class);
 
     return Words.builder()
-        .words(parseRes(res))
+        .words(parseWordRes(res))
         .build();
+  }
+
+  public EvaluationRes evaluationSentence(AiPrompt prompt, EvaluationReq request){
+    String jsonInput = objectMapper.writeValueAsString(request);
+    String pr = String.format(prompt.getPrompt(),jsonInput);
+
+    GeminiReq req = createReq(pr);
+
+    GeminiRes res = restClient.post()
+        .body(req)
+        .retrieve()
+        .body(GeminiRes.class);
+
+    return parseEvaluationRes(res);
   }
 
   private GeminiReq createReq(String prompt) {
@@ -51,13 +67,13 @@ public class AiService {
     return new GeminiReq(List.of(content), config);
   }
 
-  private List<Word> parseRes(GeminiRes response) {
+  private List<Word> parseWordRes(GeminiRes response) {
     if (response == null || response.candidates() == null || response.candidates().isEmpty()) {
       throw new IllegalArgumentException("응답 생성 중 에러 발생");
     }
 
     try {
-      String jsonText = response.candidates().get(0).content().parts().get(0).text();
+      String jsonText = response.candidates().getFirst().content().parts().getFirst().text();
 
       int firstBrace = jsonText.indexOf("{");
       int lastBrace = jsonText.lastIndexOf("}");
@@ -69,6 +85,26 @@ public class AiService {
       String cleanJson = jsonText.substring(firstBrace, lastBrace + 1);
 
       return objectMapper.readValue(cleanJson, Words.class).words();
+
+    } catch (Exception e) {
+      throw new IllegalArgumentException("응답 처리 중 에러 발생");
+    }
+  }
+
+  private EvaluationRes parseEvaluationRes(GeminiRes response){
+    try {
+      String jsonText = response.candidates().getFirst().content().parts().getFirst().text();
+
+      int firstBrace = jsonText.indexOf("{");
+      int lastBrace = jsonText.lastIndexOf("}");
+
+      if (firstBrace == -1 && lastBrace == -1) {
+        throw new IllegalArgumentException("응답 처리 중 에러 발생");
+      }
+
+      String cleanJson = jsonText.substring(firstBrace, lastBrace + 1);
+
+      return objectMapper.readValue(cleanJson, EvaluationRes.class);
 
     } catch (Exception e) {
       throw new IllegalArgumentException("응답 처리 중 에러 발생");
