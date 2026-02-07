@@ -1,0 +1,69 @@
+name: Deploy Spring Boot to EC2
+
+on:
+  push:
+    branches: [ "develop" ] # develop 브랜치에 푸시될 때 실행
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v3
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build with Gradle
+        run: ./gradlew build -x test
+
+      # [수정 1] EC2에 접속해서 기존 파일 미리 청소하기
+      # (이 단계가 없으면 파일이 계속 쌓여서 나중에 에러납니다)
+      - name: Clean up old build files
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            # 폴더가 없으면 만들고, 있으면 안의 내용물(JAR)만 지움
+            mkdir -p /home/ec2-user/cheong/build/libs
+            rm -rf /home/ec2-user/cheong/build/libs/*
+
+      # [수정 2] 이제 깨끗한 폴더에 파일 전송
+      - name: Copy JAR to EC2
+        uses: appleboy/scp-action@master
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: "build/libs/*.jar"
+          target: "/home/ec2-user/cheong"
+
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            # 1. 실행 중인 Spring Boot(8080 포트) 강제 종료
+            sudo fuser -k 8080/tcp || true
+            
+            # 2. 잠시 대기 (완전히 꺼질 때까지)
+            sleep 5
+            rm -f /home/ec2-user/cheong/build/libs/*-plain.jar
+            
+            set -a
+            source /etc/environment
+            set +a
+            # 3. 새 서버 실행
+            # (이제 폴더에 JAR 파일이 딱 하나만 있으므로 *를 써도 안전함)
+            nohup java -jar /home/ec2-user/cheong/build/libs/*.jar > /home/ec2-user/app.log 2>&1 &
