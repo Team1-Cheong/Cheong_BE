@@ -4,13 +4,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 
 @Data
-public class LearningCompleteRequest {
-
-    @Schema(description = "유저 ID (헤더 대신 바디로 받을 경우)", example = "test_user_1")
-    private String userId;
-
-    @Schema(description = "단어 ID (어떤 단어를 학습했는지 식별용)", example = "65c2a...")
-    private String wordId;
+public class LearningHistoryPatchRequest {
 
     @Schema(description = "유저가 최종 작성한 예문", example = "I want to be a resilient person.")
     private String userSentence;
@@ -20,5 +14,5 @@ public class LearningCompleteRequest {
 
     @Schema(description = "AI가 제공한 추천 예문", example = "She remained resilient despite the difficulties.")
     private String aiSentence;
-
 }
+
