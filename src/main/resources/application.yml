@@ -1,1 +1,7 @@
-spring.data.mongodb.uri=mongodb+srv://db_user:db_pw@cheong1.8uhgyna.mongodb.net/
+mongo:
+  spring.data.mongodb.uri=mongodb+srv://db_user:db_pw@cheong1.8uhgyna.mongodb.net/
+
+gemini:
+  api:
+    key: ${GEMINI_KEY}
+    url: ${GEMINI_URL}
