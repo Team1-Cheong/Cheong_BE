@@ -5,8 +5,12 @@ import com.springdemo.main.cheong_be.dto.HistoryResDto;
 import com.springdemo.main.cheong_be.model.*;
 import com.springdemo.main.cheong_be.repository.*;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.data.domain.Sort;
 
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -25,41 +29,44 @@ public class LearningService {
 
 
     /**
-     * [3] 학습 이력 조회
+     * [3] 학습 이력 조회: Pagination 적용
      */
     @Transactional(readOnly = true)
-    public List<HistoryResDto> getHistory(String userId) {
-        // 1. 히스토리 전체 조회
-        List<LearningHistory> histories = learningHistoryRepository.findAllByUserIdOrderByCreatedAtDesc(userId);
+    public Page<HistoryResDto> getHistory(String userId, int page, int size) {
+        // 1. Pageable 객체 생성 (날짜 내림차순 정렬 포함)
+        Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
 
-        if (histories.isEmpty()) {
-            return new ArrayList<>();
+        // 2. DB에서 해당 페이지의 데이터만 가져오기 (전체 조회 X)
+        Page<LearningHistory> historyPage = learningHistoryRepository.findAllByUserId(userId, pageable);
+
+        // 데이터가 아예 없으면 빈 페이지 반환
+        if (historyPage.isEmpty()) {
+            return Page.empty(pageable);
         }
 
-        // 2. 최적화: 루프 돌 때마다 DB 조회하면 느리니까, ID들을 모아서 한 번에 단어를 가져옴 (Batch Fetch)
-        Set<String> wordIds = histories.stream()
+        // 3. [최적화] 현재 페이지에 있는 '3개'의 단어 ID만 수집
+        Set<String> wordIds = historyPage.getContent().stream()
                 .map(LearningHistory::getWordId)
                 .collect(Collectors.toSet());
 
-        // ID를 키(Key)로 하고 Word 객체를 값(Value)으로 하는 맵 생성 -> 검색 속도 O(1)
+        // 4. 단어 정보 가져오기 (딱 3개만 조회하므로 매우 빠름)
         Map<String, Word> wordMap = wordRepository.findAllById(wordIds).stream()
                 .collect(Collectors.toMap(Word::getId, w -> w));
 
-        // 3. 변환 (History + Word -> DTO)
-        return histories.stream().map(h -> {
-            // 맵에서 단어 찾기 (혹시 단어가 삭제되었을 경우를 대비해 getOrDefault 사용)
+        // 5. 변환 (Page.map()을 사용하면 내부 콘텐츠만 싹 변환해서 다시 Page로 만들어줌)
+        return historyPage.map(h -> {
             Word w = wordMap.getOrDefault(h.getWordId(), Word.builder().word("삭제된 단어").meaning("-").build());
 
             return HistoryResDto.builder()
                     .id(h.getId())
-                    .word(w.getWord())       // ★ 실제 단어 매핑
-                    .meaning(w.getMeaning()) // ★ 뜻 매핑
+                    .word(w.getWord())
+                    .meaning(w.getMeaning())
                     .userSentence(h.getUserSentence())
                     .aiEvaluation(h.getAiEvaluation())
-                    .aiSentences(h.getAiSentences()) // List<String>
+                    .aiSentences(h.getAiSentences())
                     .createdAt(h.getCreatedAt())
                     .build();
-        }).collect(Collectors.toList());
+        });
     }
 
     @Transactional(readOnly = true)
