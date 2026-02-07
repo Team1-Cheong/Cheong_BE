@@ -8,4 +8,5 @@ import java.util.Optional;
 @Repository
 public interface WordRepository extends MongoRepository<Word, String> {
     Optional<Word> findByWord(String word);
+    Optional<Word> findFirstByWordContaining(String word);
 }
