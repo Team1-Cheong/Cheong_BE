@@ -41,15 +41,12 @@ public class LearningController {
     }
 
 
-    // 요청 예시: GET /api/history?page=0 (첫 번째 페이지)
-    // 요청 예시: GET /api/history?page=1 (두 번째 페이지)
+
     @GetMapping("/history")
-    public Page<HistoryResDto> getHistory(
-            @RequestHeader(value = "X-User-Id", defaultValue = "test_user_1") String userId,
-            @RequestParam(defaultValue = "0") int page, // 페이지 번호 (기본 0)
-            @RequestParam(defaultValue = "3") int size  // 페이지 크기 (기본 3)
+    public List<HistoryResDto> getHistory(
+            @RequestHeader(value = "X-User-Id", defaultValue = "test_user_1") String userId
     ) {
-        return learningService.getHistory(userId, page, size);
+        return learningService.getHistory(userId);
     }
 
 }
