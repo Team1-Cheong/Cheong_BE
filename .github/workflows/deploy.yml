@@ -59,11 +59,7 @@ jobs:
             
             # 2. 잠시 대기 (완전히 꺼질 때까지)
             sleep 5
-            rm -f /home/ec2-user/cheong/build/libs/*-plain.jar
             
-            set -a
-            source /etc/environment
-            set +a
             # 3. 새 서버 실행
             # (이제 폴더에 JAR 파일이 딱 하나만 있으므로 *를 써도 안전함)
             nohup java -jar /home/ec2-user/cheong/build/libs/*.jar > /home/ec2-user/app.log 2>&1 &
