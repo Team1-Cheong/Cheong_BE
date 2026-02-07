@@ -24,4 +24,17 @@ public class AiResDto {
   public record Words(List<Word> words){
 
   }
+
+  public record Feedback(
+      String feedback,
+      List<String> examples
+  ){
+
+  }
+
+  public record EvaluationRes(
+      List<Feedback> feedbacks
+  ){
+
+  }
 }

@@ -31,7 +31,7 @@ public class LearningController {
             @RequestHeader(value = "X-User-Id", defaultValue = "test_user_1") String userId
     ) {
         // userId를 같이 넘겨줍니다!
-        return aiService.generateWords(userId, AiPrompt.GET_THREE_WORDS);
+        return aiService.generateWords(AiPrompt.GET_THREE_WORDS);
     }
 
     // [2] 통합된 학습 완료 처리 (Gemini 호출 + 저장 + 스트릭 갱신)
