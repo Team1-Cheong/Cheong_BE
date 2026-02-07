@@ -1,6 +1,7 @@
 package com.springdemo.main.cheong_be.service;
 
 import com.springdemo.main.cheong_be.dto.DailyWordResponse;
+import com.springdemo.main.cheong_be.dto.HomeResDto;
 import com.springdemo.main.cheong_be.dto.LearningCompleteRequest;
 import com.springdemo.main.cheong_be.dto.LearningCompleteResponse;
 import com.springdemo.main.cheong_be.model.*;
@@ -184,5 +185,38 @@ public class LearningService {
      */
     public List<LearningHistory> getHistory(String userId) {
         return learningHistoryRepository.findAllByUserIdOrderByCreatedAtDesc(userId);
+    }
+
+    @Transactional(readOnly = true)
+    public HomeResDto getHomeData(String userId) {
+        LocalDate today = LocalDate.now();
+
+        // 1. 유저 진행 상황 (스트릭) 조회
+        UserProgress progress = userProgressRepository.findById(userId)
+                .orElse(UserProgress.builder()
+                        .userId(userId)
+                        .currentStreak(0)
+                        .todayCompleted(false)
+                        .build());
+
+        // 2. 오늘의 학습 로그 조회 (오늘 몇 개 했는지)
+        DailyLog dailyLog = dailyLogRepository.findByUserIdAndDate(userId, today).orElse(null);
+        int todayCount = (dailyLog == null) ? 0 : dailyLog.getCompletedWordIds().size();
+        boolean isGoalReached = todayCount >= 3;
+
+        // 3. 캘린더용: 이번 달 학습 기록이 있는 날짜들 조회 (예: 최근 30일)
+        // (간단하게 구현하기 위해 DailyLog에서 날짜만 뽑아옵니다)
+        List<LocalDate> studiedDates = dailyLogRepository.findAllByUserId(userId).stream()
+                .map(DailyLog::getDate)
+                .sorted()
+                .collect(Collectors.toList());
+
+        return HomeResDto.builder()
+                .userId(userId)
+                .currentStreak(progress.getCurrentStreak())
+                .isTodayCompleted(isGoalReached) // 3개 이상이면 완료로 침
+                .todayCompletedCount(todayCount)
+                .studiedDates(studiedDates)
+                .build();
     }
 }
