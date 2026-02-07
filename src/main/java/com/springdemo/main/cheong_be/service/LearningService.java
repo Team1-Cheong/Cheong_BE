@@ -112,73 +112,73 @@ public class LearningService {
         return dailyLogRepository.save(newLog);
     }
 
-    /**
-     * [2] 통합된 학습 완료 처리 (Gemini 호출 + 저장 + 스트릭)
-     */
-    @Transactional
-    public LearningCompleteResponse completeLearning(LearningCompleteRequest request) {
-        String userId = request.getUserId();
-        LocalDate today = LocalDate.now();
-
-        // [Step 1] 서버 내부에서 Gemini API 호출 (임시 데이터)
-        // AiResponse aiRes = aiService.eval(request.getUserSentence());
-        String aiEvaluation = "문법적으로 자연스럽습니다! (Gemini)";
-        String aiSentence = "Here is a better example... (Gemini)";
-
-        // [Step 2] 완성된 데이터를 한 번에 저장 (History)
-        LearningHistory history = LearningHistory.builder()
-                .userId(userId)
-                .wordId(request.getWordId())
-                .userSentence(request.getUserSentence())
-                .aiEvaluation(aiEvaluation)
-                .aiSentence(aiSentence)
-                .build();
-        learningHistoryRepository.save(history);
-
-        // [Step 3] DailyLog 업데이트
-        DailyLog dailyLog = dailyLogRepository.findByUserIdAndDate(userId, today)
-                .orElseThrow(() -> new RuntimeException("오늘의 학습 로그가 없습니다. (먼저 /words/daily를 호출하세요)"));
-
-        if (!dailyLog.getCompletedWordIds().contains(request.getWordId())) {
-            dailyLog.getCompletedWordIds().add(request.getWordId());
-            dailyLogRepository.save(dailyLog);
-        }
-
-        // [Step 4] Streak 관리
-        UserProgress progress = userProgressRepository.findById(userId)
-                .orElse(UserProgress.builder()
-                        .userId(userId)
-                        .currentStreak(0)
-                        .todayCompleted(false)
-                        .build());
-
-        boolean isGoalCompleted = dailyLog.getCompletedWordIds().size() >= 3;
-        String message = "학습이 저장되었습니다.";
-
-        if (isGoalCompleted && !progress.isTodayCompleted()) {
-            LocalDate yesterday = today.minusDays(1);
-
-            // 어제 했으면 연속 스트릭, 아니면 1일차
-            if (progress.getLastLearningDate() != null && progress.getLastLearningDate().equals(yesterday)) {
-                progress.setCurrentStreak(progress.getCurrentStreak() + 1);
-            } else {
-                progress.setCurrentStreak(1);
-            }
-            progress.setTodayCompleted(true);
-            progress.setLastLearningDate(today);
-            message = "축하합니다! 오늘의 목표 달성! Streak +1 🔥";
-        }
-        userProgressRepository.save(progress);
-
-        // [Step 5] 결과 반환
-        return LearningCompleteResponse.builder()
-                .currentStreak(progress.getCurrentStreak())
-                .isDailyGoalCompleted(isGoalCompleted)
-                .message(message)
-                .aiEvaluation(aiEvaluation)
-                .aiSentence(aiSentence)
-                .build();
-    }
+//    /**
+//     * [2] 통합된 학습 완료 처리 (Gemini 호출 + 저장 + 스트릭)
+//     */
+//    @Transactional
+//    public LearningCompleteResponse completeLearning(LearningCompleteRequest request) {
+//        String userId = request.getUserId();
+//        LocalDate today = LocalDate.now();
+//
+//        // [Step 1] 서버 내부에서 Gemini API 호출 (임시 데이터)
+//        // AiResponse aiRes = aiService.eval(request.getUserSentence());
+//        String aiEvaluation = "문법적으로 자연스럽습니다! (Gemini)";
+//        String aiSentence = "Here is a better example... (Gemini)";
+//
+//        // [Step 2] 완성된 데이터를 한 번에 저장 (History)
+//        LearningHistory history = LearningHistory.builder()
+//                .userId(userId)
+//                .wordId(request.getWordId())
+//                .userSentence(request.getUserSentence())
+//                .aiEvaluation(aiEvaluation)
+//                .aiSentences(aiSentence)
+//                .build();
+//        learningHistoryRepository.save(history);
+//
+//        // [Step 3] DailyLog 업데이트
+//        DailyLog dailyLog = dailyLogRepository.findByUserIdAndDate(userId, today)
+//                .orElseThrow(() -> new RuntimeException("오늘의 학습 로그가 없습니다. (먼저 /words/daily를 호출하세요)"));
+//
+//        if (!dailyLog.getCompletedWordIds().contains(request.getWordId())) {
+//            dailyLog.getCompletedWordIds().add(request.getWordId());
+//            dailyLogRepository.save(dailyLog);
+//        }
+//
+//        // [Step 4] Streak 관리
+//        UserProgress progress = userProgressRepository.findById(userId)
+//                .orElse(UserProgress.builder()
+//                        .userId(userId)
+//                        .currentStreak(0)
+//                        .todayCompleted(false)
+//                        .build());
+//
+//        boolean isGoalCompleted = dailyLog.getCompletedWordIds().size() >= 3;
+//        String message = "학습이 저장되었습니다.";
+//
+//        if (isGoalCompleted && !progress.isTodayCompleted()) {
+//            LocalDate yesterday = today.minusDays(1);
+//
+//            // 어제 했으면 연속 스트릭, 아니면 1일차
+//            if (progress.getLastLearningDate() != null && progress.getLastLearningDate().equals(yesterday)) {
+//                progress.setCurrentStreak(progress.getCurrentStreak() + 1);
+//            } else {
+//                progress.setCurrentStreak(1);
+//            }
+//            progress.setTodayCompleted(true);
+//            progress.setLastLearningDate(today);
+//            message = "축하합니다! 오늘의 목표 달성! Streak +1 🔥";
+//        }
+//        userProgressRepository.save(progress);
+//
+//        // [Step 5] 결과 반환
+//        return LearningCompleteResponse.builder()
+//                .currentStreak(progress.getCurrentStreak())
+//                .isDailyGoalCompleted(isGoalCompleted)
+//                .message(message)
+//                .aiEvaluation(aiEvaluation)
+//                .aiSentence(aiSentence)
+//                .build();
+//    }
 
     /**
      * [3] 학습 이력 조회

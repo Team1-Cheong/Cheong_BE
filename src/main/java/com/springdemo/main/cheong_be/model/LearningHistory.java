@@ -11,6 +11,8 @@ import org.springframework.data.mongodb.core.mapping.Document;
 
 import java.time.LocalDateTime;
 
+import java.util.List;
+
 @Data
 @Builder
 @NoArgsConstructor
@@ -28,7 +30,7 @@ public class LearningHistory {
 
     private String userSentence; // 유저가 작성한 예문
     private String aiEvaluation; // AI 평가 멘트
-    private String aiSentence;   // AI가 제안한 더 좋은 예문
+    private List<String> aiSentences;   // AI가 제안한 더 좋은 예문
 
     @CreatedDate
     private LocalDateTime createdAt; // 저장된 시간 자동 생성
