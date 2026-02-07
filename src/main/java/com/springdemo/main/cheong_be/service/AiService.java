@@ -1,6 +1,5 @@
 package com.springdemo.main.cheong_be.service;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import tools.jackson.databind.ObjectMapper;
 
 import com.springdemo.main.cheong_be.dto.AiReqDto;
@@ -18,8 +17,6 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
-import java.util.HashSet;
-import java.util.Set;
 
 import java.time.ZoneId;
 
