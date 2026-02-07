@@ -17,4 +17,16 @@ public class AiReqDto {
 
     }
   }
+  public record EvaluationReq(
+      List<UserSentence> userSentences
+  ){
+
+  }
+
+  public record UserSentence(
+      String word,
+      String sentence
+  ){
+
+  }
 }
