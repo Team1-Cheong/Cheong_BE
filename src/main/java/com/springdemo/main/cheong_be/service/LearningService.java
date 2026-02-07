@@ -2,8 +2,7 @@ package com.springdemo.main.cheong_be.service;
 
 import com.springdemo.main.cheong_be.dto.DailyWordResponse;
 import com.springdemo.main.cheong_be.dto.HomeResDto;
-import com.springdemo.main.cheong_be.dto.LearningCompleteRequest;
-import com.springdemo.main.cheong_be.dto.LearningCompleteResponse;
+import com.springdemo.main.cheong_be.dto.HistoryResDto;
 import com.springdemo.main.cheong_be.model.*;
 import com.springdemo.main.cheong_be.repository.*;
 import lombok.RequiredArgsConstructor;
@@ -12,9 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.ZoneId;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Service
@@ -117,8 +114,39 @@ public class LearningService {
     /**
      * [3] 학습 이력 조회
      */
-    public List<LearningHistory> getHistory(String userId) {
-        return learningHistoryRepository.findAllByUserIdOrderByCreatedAtDesc(userId);
+    @Transactional(readOnly = true)
+    public List<HistoryResDto> getHistory(String userId) {
+        // 1. 히스토리 전체 조회
+        List<LearningHistory> histories = learningHistoryRepository.findAllByUserIdOrderByCreatedAtDesc(userId);
+
+        if (histories.isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        // 2. 최적화: 루프 돌 때마다 DB 조회하면 느리니까, ID들을 모아서 한 번에 단어를 가져옴 (Batch Fetch)
+        Set<String> wordIds = histories.stream()
+                .map(LearningHistory::getWordId)
+                .collect(Collectors.toSet());
+
+        // ID를 키(Key)로 하고 Word 객체를 값(Value)으로 하는 맵 생성 -> 검색 속도 O(1)
+        Map<String, Word> wordMap = wordRepository.findAllById(wordIds).stream()
+                .collect(Collectors.toMap(Word::getId, w -> w));
+
+        // 3. 변환 (History + Word -> DTO)
+        return histories.stream().map(h -> {
+            // 맵에서 단어 찾기 (혹시 단어가 삭제되었을 경우를 대비해 getOrDefault 사용)
+            Word w = wordMap.getOrDefault(h.getWordId(), Word.builder().word("삭제된 단어").meaning("-").build());
+
+            return HistoryResDto.builder()
+                    .id(h.getId())
+                    .word(w.getWord())       // ★ 실제 단어 매핑
+                    .meaning(w.getMeaning()) // ★ 뜻 매핑
+                    .userSentence(h.getUserSentence())
+                    .aiEvaluation(h.getAiEvaluation())
+                    .aiSentences(h.getAiSentences()) // List<String>
+                    .createdAt(h.getCreatedAt())
+                    .build();
+        }).collect(Collectors.toList());
     }
 
     @Transactional(readOnly = true)
