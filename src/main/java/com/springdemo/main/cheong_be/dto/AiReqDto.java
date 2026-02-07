@@ -1,5 +1,7 @@
 package com.springdemo.main.cheong_be.dto;
 
+import lombok.Data;
+
 import java.util.List;
 
 public class AiReqDto {
@@ -17,16 +19,14 @@ public class AiReqDto {
 
     }
   }
-  public record EvaluationReq(
-      List<UserSentence> userSentences
-  ){
-
+  @Data
+  public static class EvaluationReq {
+    private List<UserSentence> userSentences;
   }
 
-  public record UserSentence(
-      String word,
-      String sentence
-  ){
-
+  @Data
+  public static class UserSentence {
+    private String word;
+    private String sentence;
   }
 }
