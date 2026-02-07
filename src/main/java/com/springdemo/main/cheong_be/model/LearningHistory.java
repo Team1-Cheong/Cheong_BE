@@ -32,6 +32,6 @@ public class LearningHistory {
     private String aiEvaluation; // AI 평가 멘트
     private List<String> aiSentences;   // AI가 제안한 더 좋은 예문
 
-    @CreatedDate
+    // @CreatedDate
     private LocalDateTime createdAt; // 저장된 시간 자동 생성
 }
