@@ -41,13 +41,12 @@ public class LearningController {
 
 
 
-    // [3] 히스토리 조회 (기존 유지)
-    @Operation(summary = "나의 학습 기록 조회", description = "과거 학습했던 단어와 예문들을 최신순으로 봅니다.")
+    // [3] 히스토리 조회
     @GetMapping("/history")
-    public ResponseEntity<List<LearningHistory>> getHistory(
-            @RequestParam String userId
+    public List<HistoryResDto> getHistory( // ★ 반환 타입 변경
+                                           @RequestHeader(value = "X-User-Id", defaultValue = "test_user_1") String userId
     ) {
-        return ResponseEntity.ok(learningService.getHistory(userId));
+        return learningService.getHistory(userId);
     }
 
 }
