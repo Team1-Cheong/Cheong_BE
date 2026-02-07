@@ -21,6 +21,8 @@ import java.util.stream.Collectors;
 import java.util.HashSet;
 import java.util.Set;
 
+import java.time.ZoneId;
+
 import lombok.Data;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -64,7 +66,7 @@ public class AiService {
    */
   @Transactional
   public Words generateWords(String userId, AiPrompt prompt) {
-    LocalDate today = LocalDate.now();
+    LocalDate today = LocalDate.now(ZoneId.of("Asia/Seoul"));
     DailyLog dailyLog = dailyLogRepository.findByUserIdAndDate(userId, today).orElse(null);
 
     // =================================================================
@@ -226,7 +228,7 @@ public class AiService {
   }
 
   private void saveEvaluationToHistory(String userId, EvaluationReq request, EvaluationRes response) {
-    LocalDate today = LocalDate.now();
+    LocalDate today = LocalDate.now(ZoneId.of("Asia/Seoul"));
     DailyLog dailyLog = dailyLogRepository.findByUserIdAndDate(userId, today)
             .orElseGet(() -> DailyLog.builder()
                     .userId(userId)
