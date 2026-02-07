@@ -66,4 +66,4 @@ jobs:
             set +a
             # 3. 새 서버 실행
             # (이제 폴더에 JAR 파일이 딱 하나만 있으므로 *를 써도 안전함)
-            nohup java -jar /home/ec2-user/cheong/build/libs/*.jar > /home/ec2-user/app.log 2>&1 &
+            nohup java -jar /home/ec2-user/cheong/build/libs/Cheong_BE-0.0.1-SNAPSHOT.jar > /home/ec2-user/app.log 2>&1 &
