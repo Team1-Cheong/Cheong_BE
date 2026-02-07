@@ -13,4 +13,7 @@ public interface LearningHistoryRepository extends MongoRepository<LearningHisto
 
     // 이미 학습한 단어인지 체크할 때 사용
     boolean existsByUserIdAndWordId(String userId, String wordId);
+
+    // [추가] 유저의 총 학습 기록 개수 조회 (0이면 첫 학습)
+    long countByUserId(String userId);
 }
