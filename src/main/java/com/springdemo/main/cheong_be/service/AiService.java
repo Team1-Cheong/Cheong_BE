@@ -1,22 +1,8 @@
 package com.springdemo.main.cheong_be.service;
 
-// 1. 자바 기본 유틸
-import java.time.LocalDate;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Optional;
-
-// 2. 잭슨 (JSON 처리) - tools...가 아니라 com.fasterxml... 이어야 함
 import com.fasterxml.jackson.core.JsonProcessingException;
 import tools.jackson.databind.ObjectMapper;
 
-// 3. 스프링 프레임워크 (@Service, @Transactional, @Value 등)
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.client.RestClient;
-
-// 4. 우리 프로젝트 파일들 (DTO, Model, Repository, Enum)
 import com.springdemo.main.cheong_be.dto.AiReqDto;
 import com.springdemo.main.cheong_be.dto.AiReqDto.EvaluationReq;
 import com.springdemo.main.cheong_be.dto.AiReqDto.GeminiReq;
@@ -25,8 +11,21 @@ import com.springdemo.main.cheong_be.dto.AiResDto.EvaluationRes;
 import com.springdemo.main.cheong_be.dto.AiResDto.GeminiRes;
 import com.springdemo.main.cheong_be.dto.AiResDto.Words;
 import com.springdemo.main.cheong_be.enums.AiPrompt;
-import com.springdemo.main.cheong_be.model.*;       // 모델 전체
-import com.springdemo.main.cheong_be.repository.*;  // 리포지토리 전체
+import com.springdemo.main.cheong_be.model.*;
+import com.springdemo.main.cheong_be.repository.*;
+
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.stream.Collectors;
+import java.util.HashSet;
+import java.util.Set;
+
+import lombok.Data;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.client.RestClient;
 
 @Service
 public class AiService {
@@ -37,14 +36,13 @@ public class AiService {
   private final LearningHistoryRepository learningHistoryRepository;
   private final UserProgressRepository userProgressRepository;
 
-
   public AiService(RestClient.Builder builder, ObjectMapper objectMapper,
-      WordRepository wordRepository,
-        DailyLogRepository dailyLogRepository,
-        LearningHistoryRepository learningHistoryRepository,
-        UserProgressRepository userProgressRepository,
-      @Value("${gemini.api.key}") String apiKey,
-      @Value("${gemini.api.url}") String apiUrl
+                   WordRepository wordRepository,
+                   DailyLogRepository dailyLogRepository,
+                   LearningHistoryRepository learningHistoryRepository,
+                   UserProgressRepository userProgressRepository,
+                   @Value("${gemini.api.key}") String apiKey,
+                   @Value("${gemini.api.url}") String apiUrl
   ) {
     this.objectMapper = objectMapper;
     this.wordRepository = wordRepository;
@@ -52,131 +50,194 @@ public class AiService {
     this.learningHistoryRepository = learningHistoryRepository;
     this.userProgressRepository = userProgressRepository;
     this.restClient = builder
-        .baseUrl(apiUrl)
-        .defaultHeader("x-goog-api-key", apiKey)
-        .defaultHeader("Content-Type", "application/json")
-        .build();
+            .baseUrl(apiUrl)
+            .defaultHeader("x-goog-api-key", apiKey)
+            .defaultHeader("Content-Type", "application/json")
+            .build();
   }
 
+  /**
+   * [1] 단어 할당 (새로고침 유지 + 복습 1개 + 신규 2개)
+   */
   @Transactional
-  public Words generateWords(String userId, AiPrompt prompt){
+  public Words generateWords(String userId, AiPrompt prompt) {
     LocalDate today = LocalDate.now();
-
     DailyLog dailyLog = dailyLogRepository.findByUserIdAndDate(userId, today).orElse(null);
 
+    // =================================================================
+    // [Scenario A] 새로고침/유지 (기존 코드와 동일)
+    // =================================================================
     if (dailyLog != null) {
-      List<String> allWordIds = dailyLog.getWordIds();           // 할당받은 전체 단어 ID
-      List<String> completedIds = dailyLog.getCompletedWordIds(); // 푼 단어 ID
+      List<String> allIds = dailyLog.getWordIds();
+      List<String> completedIds = dailyLog.getCompletedWordIds();
 
-      // "할당된 게 있는데(NotEmpty), 완료된 개수가 할당된 개수보다 적으면" -> 안 푼 게 남았다는 뜻!
-      if (!allWordIds.isEmpty() && completedIds.size() < allWordIds.size()) {
-
-        // ★ 중요: Gemini 호출 안 함! DB에서 기존 단어 찾아서 반환 (새로고침 유지)
-        // 아직 안 푼 단어만 줄지, 전체를 다시 보여줄지는 선택 (여기선 전체 다시 보여줌)
-        List<Word> existingWords = wordRepository.findAllById(allWordIds);
-        return Words.builder().words(existingWords).build();
+      if (!allIds.isEmpty() && completedIds.size() < allIds.size()) {
+        int batchSize = 3;
+        int startIndex = Math.max(0, allIds.size() - batchSize);
+        List<String> currentBatchIds = allIds.subList(startIndex, allIds.size());
+        return convertToDto(userId, wordRepository.findAllById(currentBatchIds));
       }
     }
 
-    String pr = String.format(prompt.getPrompt());
+    // =================================================================
+    // [Scenario B] 신규 생성
+    // =================================================================
+    List<AiResDto.WordDto> resultDtos = new ArrayList<>();
+    List<String> newIds = new ArrayList<>();
 
-    GeminiReq req = createReq(pr);
+    // 1. 복습 단어 1개 뽑기
+    List<LearningHistory> histories = learningHistoryRepository.findAllByUserIdOrderByCreatedAtDesc(userId);
+    int reviewCount = 0;
 
-    GeminiRes res = restClient.post()
-        .body(req)
-        .retrieve()
-        .body(GeminiRes.class);
+    if (!histories.isEmpty()) {
+      int randomIndex = (int) (Math.random() * histories.size());
+      String reviewId = histories.get(randomIndex).getWordId();
 
-    List<Word> generatedWords = parseWordRes(res);
+      wordRepository.findById(reviewId).ifPresent(word -> {
+        resultDtos.add(AiResDto.WordDto.builder()
+                .id(word.getId())
+                .word(word.getWord())
+                .meaning(word.getMeaning())
+                .isReview(true)
+                .build());
+        newIds.add(word.getId());
+      });
+      reviewCount = resultDtos.size();
+    }
 
-    // 단어 DB에 저장
-    List<Word> savedWords = new ArrayList<>();
-    List<String> newWordIds = new ArrayList<>();
+    // 2. 신규 단어 Gemini 요청
+    int neededCount = 3 - reviewCount;
 
-    for (Word word : generatedWords) {
-      if (wordRepository.findByWord(word.getWord()).isEmpty()) {
-        Word saved = wordRepository.save(word);
-        savedWords.add(saved);
-        newWordIds.add(saved.getId());
-      } else {
-        // 이미 있는 단어면 ID만 가져옴
-        Word existing = wordRepository.findByWord(word.getWord()).get();
-        savedWords.add(existing);
-        newWordIds.add(existing.getId());
+    if (neededCount > 0) {
+
+      // -----------------------------------------------------------------
+      // ★ [핵심] 제외할 단어 목록 만들기 (%s 채우기)
+      // -----------------------------------------------------------------
+      Set<String> excludedIds = new HashSet<>();
+
+      // (1) 과거에 학습한 모든 단어 ID 가져오기
+      for (LearningHistory h : histories) {
+        excludedIds.add(h.getWordId());
+      }
+
+      // (2) 오늘 이미 뽑힌 단어 ID들도 추가 (중복 방지)
+      if (dailyLog != null) {
+        excludedIds.addAll(dailyLog.getWordIds());
+      }
+
+      // (3) ID -> 실제 단어(String)로 변환
+      // Gemini는 ID를 모르므로 "사과, 바나나" 같은 글자가 필요함
+      List<String> excludedWords = wordRepository.findAllById(excludedIds).stream()
+              .map(Word::getWord) // 단어 문자열만 추출
+              .distinct()
+              .collect(Collectors.toList());
+
+      // (4) 문자열로 합치기 (예: "사과, 바나나, 포도")
+      String excludedString = String.join(", ", excludedWords);
+      if (excludedString.isEmpty()) {
+        excludedString = "없음"; // 처음이라 제외할 게 없을 때
+      }
+
+      // (5) 프롬프트 완성 (String.format 사용)
+      String pr = String.format(prompt.getPrompt(), excludedString);
+      // -----------------------------------------------------------------
+
+      GeminiReq req = createReq(pr);
+      GeminiRes res = restClient.post().body(req).retrieve().body(GeminiRes.class);
+
+      List<Word> generated = parseWordRes(res);
+
+      int addedCount = 0;
+      for (Word w : generated) {
+        if (addedCount >= neededCount) break;
+
+        Word saved = wordRepository.findByWord(w.getWord())
+                .orElseGet(() -> wordRepository.save(w));
+
+        if (!newIds.contains(saved.getId())) {
+          resultDtos.add(AiResDto.WordDto.builder()
+                  .id(saved.getId())
+                  .word(saved.getWord())
+                  .meaning(saved.getMeaning())
+                  .isReview(false)
+                  .build());
+
+          newIds.add(saved.getId());
+          addedCount++;
+        }
       }
     }
 
-    // DailyLog 업데이트 (없으면 생성, 있으면 추가)
+    // 3. DailyLog 업데이트
     if (dailyLog == null) {
       dailyLog = DailyLog.builder()
               .userId(userId)
               .date(today)
-              .wordIds(newWordIds) // 새 단어들
+              .wordIds(newIds)
               .completedWordIds(new ArrayList<>())
               .build();
     } else {
-      // 이미 존재하면 기존 리스트에 '추가' (Add All)
-      dailyLog.getWordIds().addAll(newWordIds);
+      dailyLog.getWordIds().addAll(newIds);
     }
-
     dailyLogRepository.save(dailyLog);
 
-    return Words.builder()
-        .words(savedWords)
-        .build();
+    return Words.builder().words(resultDtos).build();
   }
 
+  // [DTO 변환] Word -> WordDto (isReview 플래그 포함)
+  private Words convertToDto(String userId, List<Word> words) {
+    List<AiResDto.WordDto> dtos = words.stream().map(word -> {
+      boolean isReview = learningHistoryRepository.existsByUserIdAndWordId(userId, word.getId());
+      return AiResDto.WordDto.builder()
+              .id(word.getId())
+              .word(word.getWord())
+              .meaning(word.getMeaning())
+              .isReview(isReview)
+              .build();
+    }).collect(Collectors.toList());
+
+    return Words.builder().words(dtos).build();
+  }
+
+  /**
+   * [2] 문장 평가 및 저장
+   */
   @Transactional
   public EvaluationRes evaluationSentence(String userId, AiPrompt prompt, EvaluationReq request) {
-      // 1. Gemini 요청
       String jsonInput = objectMapper.writeValueAsString(request);
       String pr = String.format(prompt.getPrompt(), jsonInput);
 
       GeminiReq req = createReq(pr);
-      GeminiRes res = restClient.post()
-              .body(req)
-              .retrieve()
-              .body(GeminiRes.class);
+      GeminiRes res = restClient.post().body(req).retrieve().body(GeminiRes.class);
 
       EvaluationRes evaluationRes = parseEvaluationRes(res);
-
-      // 2. DB 저장 (심플하게 호출)
       saveEvaluationToHistory(userId, request, evaluationRes);
 
       return evaluationRes;
   }
 
-  // ★ 수정된 저장 메서드 (심플 버전)
-  // 내부 메서드: 실제 DB 저장 로직
   private void saveEvaluationToHistory(String userId, EvaluationReq request, EvaluationRes response) {
     LocalDate today = LocalDate.now();
-
-    // 없으면 "빈 로그" 생성 (Lazy Creation)
     DailyLog dailyLog = dailyLogRepository.findByUserIdAndDate(userId, today)
             .orElseGet(() -> DailyLog.builder()
                     .userId(userId)
                     .date(today)
-                    .completedWordIds(new ArrayList<>()) // 빈 리스트 초기화
-                    .wordIds(new ArrayList<>())          // 할당된 단어도 일단 빈 상태
+                    .completedWordIds(new ArrayList<>())
+                    .wordIds(new ArrayList<>())
                     .build());
 
-
-    // 1. DTO를 class로 바꿨으므로 getter 메서드 사용
     List<AiReqDto.UserSentence> inputs = request.getUserSentences();
     List<AiResDto.Feedback> outputs = response.getFeedbacks();
-
     int size = Math.min(inputs.size(), outputs.size());
 
     for (int i = 0; i < size; i++) {
       AiReqDto.UserSentence input = inputs.get(i);
       AiResDto.Feedback output = outputs.get(i);
 
-      // 단어 ID 찾기
       String wordId = wordRepository.findFirstByWordContaining(input.getWord())
               .map(Word::getId)
               .orElse("unknown");
 
-      // History 저장
       LearningHistory history = LearningHistory.builder()
               .userId(userId)
               .wordId(wordId)
@@ -185,22 +246,16 @@ public class AiService {
               .aiSentence((output.getExamples() != null && !output.getExamples().isEmpty())
                       ? output.getExamples().get(0) : null)
               .build();
-
       learningHistoryRepository.save(history);
 
-      // DailyLog에 완료 도장 찍기
       if (!"unknown".equals(wordId) && !dailyLog.getCompletedWordIds().contains(wordId)) {
         dailyLog.getCompletedWordIds().add(wordId);
       }
     }
-
-    // ★ 중요: 여기서 dailyLog가 신규 생성이든 수정이든 저장이 됩니다.
     dailyLogRepository.save(dailyLog);
-
     updateStreak(userId, dailyLog);
   }
 
-  // 스트릭 업데이트 (유지)
   private void updateStreak(String userId, DailyLog dailyLog) {
     if (dailyLog.getCompletedWordIds().size() >= 3) {
       UserProgress progress = userProgressRepository.findById(userId)
@@ -215,14 +270,18 @@ public class AiService {
     }
   }
 
-
-
-
+  // --- Gemini 파싱용 임시 클래스 (내부 정의) ---
+  // Gemini는 "isReview" 필드를 모르고 "word", "meaning"만 줍니다.
+  // 그래서 이걸로 먼저 받은 뒤, 나중에 WordDto로 바꿉니다.
+  @Data
+  private static class TempGeminiWords {
+    private List<Word> words;
+  }
 
   private GeminiReq createReq(String prompt) {
     var part = new GeminiReq.Part(prompt);
     var content = new GeminiReq.Content(List.of(part));
-    var config = new GeminiReq.GenerationConfig("application/json"); // JSON 모드 활성화
+    var config = new GeminiReq.GenerationConfig("application/json");
     return new GeminiReq(List.of(content), config);
   }
 
@@ -230,41 +289,29 @@ public class AiService {
     if (response == null || response.candidates() == null || response.candidates().isEmpty()) {
       throw new IllegalArgumentException("응답 생성 중 에러 발생");
     }
-
     try {
       String jsonText = response.candidates().getFirst().content().parts().getFirst().text();
-
       int firstBrace = jsonText.indexOf("{");
       int lastBrace = jsonText.lastIndexOf("}");
-
-      if (firstBrace == -1 && lastBrace == -1) {
-        throw new IllegalArgumentException("응답 처리 중 에러 발생");
-      }
+      if (firstBrace == -1 && lastBrace == -1) throw new IllegalArgumentException("응답 에러");
 
       String cleanJson = jsonText.substring(firstBrace, lastBrace + 1);
 
-      return objectMapper.readValue(cleanJson, Words.class).words();
+      // ★ [핵심 수정] TempGeminiWords로 받아서 .getWords() 호출
+      return objectMapper.readValue(cleanJson, TempGeminiWords.class).getWords();
 
     } catch (Exception e) {
-      throw new IllegalArgumentException("응답 처리 중 에러 발생");
+      throw new RuntimeException("단어 파싱 에러: " + e.getMessage());
     }
   }
 
-  private EvaluationRes parseEvaluationRes(GeminiRes response){
+  private EvaluationRes parseEvaluationRes(GeminiRes response) {
     try {
       String jsonText = response.candidates().getFirst().content().parts().getFirst().text();
-
       int firstBrace = jsonText.indexOf("{");
       int lastBrace = jsonText.lastIndexOf("}");
-
-      if (firstBrace == -1 && lastBrace == -1) {
-        throw new IllegalArgumentException("응답 처리 중 에러 발생");
-      }
-
       String cleanJson = jsonText.substring(firstBrace, lastBrace + 1);
-
       return objectMapper.readValue(cleanJson, EvaluationRes.class);
-
     } catch (Exception e) {
       throw new IllegalArgumentException("응답 처리 중 에러 발생");
     }
