@@ -247,14 +247,19 @@ public class AiService {
               .map(Word::getId)
               .orElse("unknown");
 
+      // [수정된 부분]
       LearningHistory history = LearningHistory.builder()
               .userId(userId)
               .wordId(wordId)
               .userSentence(input.getSentence())
               .aiEvaluation(output.getFeedback())
-              .aiSentence((output.getExamples() != null && !output.getExamples().isEmpty())
-                      ? output.getExamples().get(0) : null)
+              // ★ 기존: 하나만 뽑아서 저장 (.get(0))
+              // .aiSentence((output.getExamples() != null && !output.getExamples().isEmpty()) ? output.getExamples().get(0) : null)
+
+              // ★ 변경: 리스트 전체 저장
+              .aiSentences(output.getExamples())
               .build();
+
       learningHistoryRepository.save(history);
 
       if (!"unknown".equals(wordId) && !dailyLog.getCompletedWordIds().contains(wordId)) {
