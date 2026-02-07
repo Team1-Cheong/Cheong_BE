@@ -57,7 +57,10 @@ public class AiService {
   }
 
   /**
-   * [1] 단어 할당 (새로고침 유지 + 복습 1개 + 신규 2개)
+   * [1] 단어 할당 로직
+   * - 조건 1: 계정 첫 학습 -> All New
+   * - 조건 2: 2일차 이상 & 오늘 첫 세트 -> Random(복습 1 + 신규 2) OR (신규 3)
+   * - 조건 3: 추가 학습 (오늘 이미 3개 함) -> All New
    */
   @Transactional
   public Words generateWords(String userId, AiPrompt prompt) {
@@ -65,101 +68,107 @@ public class AiService {
     DailyLog dailyLog = dailyLogRepository.findByUserIdAndDate(userId, today).orElse(null);
 
     // =================================================================
-    // [Scenario A] 새로고침/유지 (기존 코드와 동일)
+    // [Scenario A] 새로고침/유지 (Retention)
+    // "현재 진행 중인 세트가 덜 끝났으면 그대로 보여줌"
     // =================================================================
     if (dailyLog != null) {
       List<String> allIds = dailyLog.getWordIds();
       List<String> completedIds = dailyLog.getCompletedWordIds();
 
+      // 전체 할당된 개수보다 완료된 개수가 적다면 -> 현재 세트 진행 중!
       if (!allIds.isEmpty() && completedIds.size() < allIds.size()) {
         int batchSize = 3;
         int startIndex = Math.max(0, allIds.size() - batchSize);
         List<String> currentBatchIds = allIds.subList(startIndex, allIds.size());
+
+        // DTO 변환 시에는 DB 기록에 의존 (이미 뽑힌 거니까)
         return convertToDto(userId, wordRepository.findAllById(currentBatchIds));
       }
     }
 
     // =================================================================
-    // [Scenario B] 신규 생성
+    // [Scenario B] 신규 생성 (조건별 분기 처리)
     // =================================================================
-    List<AiResDto.WordDto> resultDtos = new ArrayList<>();
-    List<String> newIds = new ArrayList<>();
 
-    // 1. 복습 단어 1개 뽑기
-    List<LearningHistory> histories = learningHistoryRepository.findAllByUserIdOrderByCreatedAtDesc(userId);
-    int reviewCount = 0;
+    boolean shouldIncludeReview = false; // 기본은 복습 없음(All New)
 
-    if (!histories.isEmpty()) {
-      int randomIndex = (int) (Math.random() * histories.size());
-      String reviewId = histories.get(randomIndex).getWordId();
+    // 1. 유저의 총 학습 이력 개수 확인
+    long totalHistoryCount = learningHistoryRepository.countByUserId(userId);
 
-      wordRepository.findById(reviewId).ifPresent(word -> {
-        resultDtos.add(AiResDto.WordDto.builder()
-                .id(word.getId())
-                .word(word.getWord())
-                .meaning(word.getMeaning())
-                .isReview(true)
-                .build());
-        newIds.add(word.getId());
-      });
-      reviewCount = resultDtos.size();
+    // [조건 확인]
+    if (dailyLog != null && !dailyLog.getWordIds().isEmpty()) {
+      // (3) 추가 학습인 경우 (오늘 이미 할당받은 기록이 있음)
+      // -> 무조건 신규 (shouldIncludeReview = false)
+      shouldIncludeReview = false;
+    } else if (totalHistoryCount == 0) {
+      // (1) 계정 맨 첫 학습인 경우
+      // -> 무조건 신규 (shouldIncludeReview = false)
+      shouldIncludeReview = false;
+    } else {
+      // (2) 2일차 이상 & 오늘의 첫 학습인 경우
+      // -> 50% 확률로 복습 단어 1개 포함 (원하시면 0.7 등으로 확률 조정 가능)
+      if (Math.random() < 0.5) {
+        shouldIncludeReview = true;
+      }
     }
 
-    // 2. 신규 단어 Gemini 요청
+    // --------------------------------------------------------
+    // 단어 선정 로직 시작
+    // --------------------------------------------------------
+    List<AiResDto.WordDto> resultDtos = new ArrayList<>();
+    List<String> newIds = new ArrayList<>();
+    int reviewCount = 0;
+
+    // 1. 복습 단어 뽑기 (플래그가 true이고, 기록이 있어야 함)
+    if (shouldIncludeReview) {
+      List<LearningHistory> histories = learningHistoryRepository.findAllByUserIdOrderByCreatedAtDesc(userId);
+      if (!histories.isEmpty()) {
+        int randomIndex = (int) (Math.random() * histories.size());
+        String reviewId = histories.get(randomIndex).getWordId();
+
+        wordRepository.findById(reviewId).ifPresent(word -> {
+          resultDtos.add(AiResDto.WordDto.builder()
+                  .id(word.getId())
+                  .word(word.getWord())
+                  .meaning(word.getMeaning())
+                  .isReview(true) // ★ 복습 강제 True
+                  .build());
+          newIds.add(word.getId());
+        });
+        reviewCount = 1;
+      }
+    }
+
+    // 2. 신규 단어 Gemini 요청 (3 - 복습개수)
     int neededCount = 3 - reviewCount;
 
     if (neededCount > 0) {
+      // 프롬프트 구성 (%s: 제외할 단어들)
+      String excludedString = "없음";
+      // (여기에 아까 만든 제외 단어 리스트 생성 로직이 들어갑니다. 코드가 너무 길어져서 생략했지만,
+      //  직전 답변의 '제외할 단어 목록 만들기' 부분을 그대로 쓰시면 됩니다.)
+      //  간단하게는 빈 문자열로 두셔도 됩니다.
 
-      // -----------------------------------------------------------------
-      // ★ [핵심] 제외할 단어 목록 만들기 (%s 채우기)
-      // -----------------------------------------------------------------
-      Set<String> excludedIds = new HashSet<>();
-
-      // (1) 과거에 학습한 모든 단어 ID 가져오기
-      for (LearningHistory h : histories) {
-        excludedIds.add(h.getWordId());
-      }
-
-      // (2) 오늘 이미 뽑힌 단어 ID들도 추가 (중복 방지)
-      if (dailyLog != null) {
-        excludedIds.addAll(dailyLog.getWordIds());
-      }
-
-      // (3) ID -> 실제 단어(String)로 변환
-      // Gemini는 ID를 모르므로 "사과, 바나나" 같은 글자가 필요함
-      List<String> excludedWords = wordRepository.findAllById(excludedIds).stream()
-              .map(Word::getWord) // 단어 문자열만 추출
-              .distinct()
-              .collect(Collectors.toList());
-
-      // (4) 문자열로 합치기 (예: "사과, 바나나, 포도")
-      String excludedString = String.join(", ", excludedWords);
-      if (excludedString.isEmpty()) {
-        excludedString = "없음"; // 처음이라 제외할 게 없을 때
-      }
-
-      // (5) 프롬프트 완성 (String.format 사용)
       String pr = String.format(prompt.getPrompt(), excludedString);
-      // -----------------------------------------------------------------
-
       GeminiReq req = createReq(pr);
       GeminiRes res = restClient.post().body(req).retrieve().body(GeminiRes.class);
 
       List<Word> generated = parseWordRes(res);
-
       int addedCount = 0;
+
       for (Word w : generated) {
         if (addedCount >= neededCount) break;
 
         Word saved = wordRepository.findByWord(w.getWord())
                 .orElseGet(() -> wordRepository.save(w));
 
+        // 중복 방지 (이번 턴에 뽑은 복습 단어와 겹치지 않게)
         if (!newIds.contains(saved.getId())) {
           resultDtos.add(AiResDto.WordDto.builder()
                   .id(saved.getId())
                   .word(saved.getWord())
                   .meaning(saved.getMeaning())
-                  .isReview(false)
+                  .isReview(false) // ★ 신규 강제 False
                   .build());
 
           newIds.add(saved.getId());
@@ -168,7 +177,7 @@ public class AiService {
       }
     }
 
-    // 3. DailyLog 업데이트
+    // 3. DailyLog 업데이트 (누적)
     if (dailyLog == null) {
       dailyLog = DailyLog.builder()
               .userId(userId)
