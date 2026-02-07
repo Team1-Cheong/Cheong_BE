@@ -1,6 +1,5 @@
 package com.springdemo.main.cheong_be.service;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import tools.jackson.databind.ObjectMapper;
 
 import com.springdemo.main.cheong_be.dto.AiReqDto;
